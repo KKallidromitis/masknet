@@ -1,0 +1,13 @@
+conda create -n vissl_env python=3.7
+conda activate vissl_env
+conda install pytorch==1.7.1 torchvision==0.8.2 torchaudio==0.7.2 cudatoolkit=10.2 -c pytorch
+conda install -c vissl apex
+conda install -c conda-forge jupyterlab
+pip install --progress-bar off -r requirements.txt
+pip install opencv-python
+pip install classy-vision@https://github.com/facebookresearch/ClassyVision/tarball/4785d5ee19d3bcedd5b28c1eb51ea1f59188b54d
+pip install fairscale@https://github.com/facebookresearch/fairscale/tarball/df7db85cef7f9c30a5b821007754b96eb1f977b6
+pip install -e ".[dev]"
+pip install scikit-image
+pip install ipdb
+pip install wandb
