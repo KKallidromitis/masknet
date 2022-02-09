@@ -108,7 +108,7 @@ def detcon_train_step(task):
     assert isinstance(task, ClassyTask), "task is not instance of ClassyTask"
     # reset the last batch info at every step
     task.last_batch = LastBatchInfo()
-    
+    batch_size = task.config.DATA.TRAIN.BATCHSIZE_PER_REPLICA
     # We'll time train_step and some of its sections, and accumulate values
     # into perf_stats if it were defined in local_variables:
     perf_stats = task.perf_stats
@@ -164,6 +164,7 @@ def detcon_train_step(task):
             mask = torch.nn.functional.normalize(mask)
             lamda = 0.01+task.iteration*0.01 ; mask = mask*lamda + sample["mask"][0]
             '''
+            
             mask_ids = sample['mask_ids'][0]
             mask=sample['mask'][0]
             model_output = task.model(sample["input"],mask.to('cuda'))
@@ -172,16 +173,21 @@ def detcon_train_step(task):
         if len(model_output) == 1:
             model_output = model_output[0]
 
+        model_output1,model_output2 = model_output[:batch_size],model_output[batch_size:]
+        mask_ids1,mask_ids2 = mask_ids[:batch_size],mask_ids[batch_size:]
+        
         task.last_batch.sample = sample
         task.last_batch.model_output = model_output
+        task.last_batch.mask_ids = mask_ids
         target = sample["target"]
 
         # Run hooks on forward pass
         task.run_hooks(SSLClassyHookFunctions.on_forward.name)
 
+        
         # Compute loss
         with PerfTimer("loss_compute", perf_stats), record_function("loss_compute"):
-            local_loss = task.loss(model_output,mask_ids, target)
+            local_loss = task.loss(model_output1,model_output2,mask_ids1,mask_ids2, target)
 
         # Reduce the loss value across all nodes and gpus.
         with PerfTimer("loss_all_reduce", perf_stats):

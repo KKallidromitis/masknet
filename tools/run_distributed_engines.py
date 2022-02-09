@@ -28,7 +28,7 @@ def hydra_main(overrides: List[Any]):
     from vissl.hooks import default_hook_generator
 
     ######################################################################################
-    #import ipdb;ipdb.set_trace()
+
     print(f"####### overrides: {overrides}")
     cfg = compose_hydra_configuration(overrides)
     args, config = convert_to_attrdict(cfg)

@@ -333,6 +333,10 @@ class SelfSupervisionTrainer(object):
         local_rank, _ = get_machine_local_and_dist_rank()
         logging.info(f"Phase advanced. Rank: {local_rank}")
 
+    # ----------------------------------------------------------------------------------- #
+    # Parent function that calls features OR label predictions functions
+    # and utility functions.
+    # ----------------------------------------------------------------------------------- #
     def extract(
         self,
         output_folder: str,
@@ -349,7 +353,7 @@ class SelfSupervisionTrainer(object):
         The features / labels are extracted for whatever data splits (train, val, test)
         the user wants.
         """
-        # support feature extraction on gpu only.
+        # support feature/label predictions extraction on gpu only.
         assert self.task.device.type == "cuda", "Set MACHINE.DEVICE = gpu"
         self.task.prepare_extraction(pin_memory=self.cfg.DATA.PIN_MEMORY)
 
@@ -409,6 +413,9 @@ class SelfSupervisionTrainer(object):
             counter[feat_name] = index + 1
         return new_feat_names
 
+    # ----------------------------------------------------------------------------------- #
+    # Extracting label predictions and utility functions.
+    # ----------------------------------------------------------------------------------- #
     def _extract_split_label_predictions(
         self,
         feat_names: List[str],
@@ -588,6 +595,9 @@ class SelfSupervisionTrainer(object):
                         f"Rank: {rank}, name: {metric_key}, value: {meter_value}"
                     )
 
+    # ----------------------------------------------------------------------------------- #
+    # Extracting features and utility functions.
+    # ----------------------------------------------------------------------------------- #
     @staticmethod
     def _flatten_features_list(features: Dict[str, Any]):
         assert isinstance(features, list), "features must be of type list"
@@ -629,6 +639,11 @@ class SelfSupervisionTrainer(object):
                 output_folder,
                 f"rank{dist_rank}_chunk{chunk_index}_{split.lower()}_{layer_name}_inds.npy",
             )
+            logging.info(
+                f"Saving features: {layer_features['features'].shape}, "
+                f"targets: {layer_features['targets'].shape}, "
+                f"inds: {layer_features['inds'].shape}"
+            )
             save_file(layer_features["features"], out_feat_file)
             save_file(layer_features["targets"], out_target_file)
             save_file(layer_features["inds"], out_inds_file)
@@ -648,9 +663,10 @@ class SelfSupervisionTrainer(object):
         for feat_name in feat_names:
             out_features[feat_name], out_targets[feat_name] = {}, {}
 
-        chunk_index = 0
-        feature_buffer_size = 0
+        chunk_index, feature_buffer_size, count = 0, 0, 0
         while True:
+            if count % 100 == 0:
+                logging.info(f"Feature extraction iteration: {count}")
             try:
                 sample = next(task.data_iterator)
                 assert isinstance(sample, dict)
@@ -701,7 +717,12 @@ class SelfSupervisionTrainer(object):
                     output_folder=output_folder,
                 )
                 break
+            count += 1
 
+    # ----------------------------------------------------------------------------------- #
+    # Extracting cluster assignments for SSL approaches
+    # that assign clusters such as SwAV and utility functions.
+    # ----------------------------------------------------------------------------------- #
     def _cleanup_task(self):
         if hasattr(self.task, "data_iterator"):
             del self.task.data_iterator
@@ -710,7 +731,7 @@ class SelfSupervisionTrainer(object):
             del self.task.dataloaders
             gc.collect()
 
-    def extract_clusters(self) -> Dict[str, Dict[int, int]]:
+    def extract_clusters(self, output_folder: str) -> Dict[str, Dict[int, int]]:
         """
         Workflow to extract multi-gpu cluster extraction for pre-trained models
         based on clusterization (SwAV, DeepCluster, etc).
@@ -724,8 +745,9 @@ class SelfSupervisionTrainer(object):
         self.task.prepare_extraction(pin_memory=self.cfg.DATA.PIN_MEMORY)
 
         # Assert that the model support extract of clusters
-        error_message = "Extracting clusters is only available for pre-training methods based on clusters"  # NOQA
-        assert self.task.base_model.is_clustering_model(), error_message
+        assert (
+            self.task.base_model.is_clustering_model()
+        ), "Extracting clusters is only available for cluster based pre-training methods"
 
         # Create distributed model
         self.task.add_dummy_layer()
@@ -739,7 +761,7 @@ class SelfSupervisionTrainer(object):
             msg = f"Extracting cluster assignment for partition: {split}"
             logging.info(msg)
             cluster_assignment[split] = self._get_cluster_assignment_for_split(
-                self.task, split
+                self.task, split, output_folder=output_folder
             )
             logging.info("Done: " + msg)
         self._cleanup_task()
@@ -747,35 +769,93 @@ class SelfSupervisionTrainer(object):
         # Merge the cluster assignments and group by cluster
         return self._merge_cluster_assignments(cluster_assignment)
 
-    def _get_cluster_assignment_for_split(self, task: ClassyTask, split: str):
+    def _get_cluster_assignment_for_split(
+        self, task: ClassyTask, split: str, output_folder: str
+    ):
         task.model.eval()
         logging.info("Model set to eval mode during feature extraction...")
+        dist_rank = torch.distributed.get_rank()
 
         cluster_assignments = {}
+        soft_cluster_assignments = {}
+        image_indices = []
+        chunk_index, buffer_size = 0, 0
+
         task.data_iterator = iter(self.task.dataloaders[split.lower()])
         while True:
             try:
                 sample = next(task.data_iterator)
                 assert isinstance(sample, dict)
                 assert "data_idx" in sample, "Indices not passed"
-
                 input_sample = {
                     "images": torch.cat(sample["data"]).cuda(non_blocking=True),
                     "indices": torch.cat(sample["data_idx"]).cpu().numpy(),
                 }
-
                 with torch.no_grad():
-                    features = task.model(input_sample["images"])
-                    features = features[0]
-                    prototype_score = features[1]
+                    outputs = task.model(input_sample["images"])
+                    prototype_score = outputs[0][1]
                     prototype_index = prototype_score.argmax(dim=-1)
                     num_images = input_sample["indices"].shape[0]
+                    buffer_size += num_images
                     for idx in range(num_images):
                         image_index = input_sample["indices"][idx]
                         cluster_assignments[image_index] = prototype_index[idx].item()
+                        soft_cluster_assignments[
+                            image_index
+                        ] = prototype_score.cpu().numpy()
+                        image_indices.append(image_index)
+
+                if buffer_size >= self.cfg.EXTRACT_FEATURES.CHUNK_THRESHOLD >= 0:
+                    self._save_extracted_prototypes(
+                        soft_assignments=soft_cluster_assignments,
+                        out_indices=image_indices,
+                        dist_rank=dist_rank,
+                        chunk_index=chunk_index,
+                        split=split,
+                        output_folder=output_folder,
+                    )
+                    soft_cluster_assignments.clear()
+                    image_indices.clear()
+                    chunk_index += 1
+                    buffer_size = 0
+
             except StopIteration:
+                if buffer_size:
+                    self._save_extracted_prototypes(
+                        soft_assignments=soft_cluster_assignments,
+                        out_indices=image_indices,
+                        dist_rank=dist_rank,
+                        chunk_index=chunk_index,
+                        split=split,
+                        output_folder=output_folder,
+                    )
                 break
         return cluster_assignments
+
+    @staticmethod
+    def _save_extracted_prototypes(
+        soft_assignments: Dict[int, np.ndarray],
+        out_indices: List[int],
+        dist_rank: int,
+        chunk_index: int,
+        split: str,
+        output_folder: str,
+    ):
+        out_indices = np.array(out_indices)
+        out_protos = np.concatenate([soft_assignments[i] for i in out_indices], axis=0)
+        out_proto_file = os.path.join(
+            output_folder,
+            f"rank{dist_rank}_chunk{chunk_index}_{split.lower()}_heads_protos.npy",
+        )
+        out_inds_file = os.path.join(
+            output_folder,
+            f"rank{dist_rank}_chunk{chunk_index}_{split.lower()}_heads_inds.npy",
+        )
+        logging.info(
+            f"Saving features: {out_protos.shape}, " f"inds: {out_indices.shape}"
+        )
+        save_file(out_protos, out_proto_file)
+        save_file(out_indices, out_inds_file)
 
     @staticmethod
     def _merge_cluster_assignments(

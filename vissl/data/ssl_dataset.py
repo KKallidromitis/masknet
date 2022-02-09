@@ -5,7 +5,7 @@
 
 import logging
 from typing import Any, Callable, Dict, Set
-import pickle
+
 import numpy as np
 from classy_vision.generic.distributed_util import get_world_size
 from iopath.common.file_io import g_pathmgr
@@ -98,8 +98,7 @@ class GenericSSLDataset(VisslDatasetBase):
         self.image_and_label_subset = None
         self._verify_data_sources(split, dataset_source_map)
         self._get_data_files(split)
-        self._get_masks()
-        
+
         if len(self.label_sources) > 0 and len(self.label_paths) > 0:
             assert len(self.label_sources) == len(self.label_paths), (
                 f"len(label_sources) != len(label paths) "
@@ -162,26 +161,7 @@ class GenericSSLDataset(VisslDatasetBase):
         logging.info(
             f"Rank: {local_rank} split: {split} Label files:\n{self.label_paths}"
         )
-        
-    def _get_masks(self):
-        import time
-        start_time = time.time()
-        with open(self.cfg.DATA.TRAIN.MASK_IDX, "rb") as file:
-            self.img_to_mask = pickle.load(file)    
-        
-        with open(self.cfg.DATA.TRAIN.MASK_DIR, "rb") as file:
-            self.mask_paths = pickle.load(file)    
-            
-        self.masks =[]
-        print(self.mask_paths)
-        for path in self.mask_paths:
-            with open(path, "rb") as file:
-                mask = pickle.load(file)
-            self.masks.append(mask)
-            
-        print("--- %s seconds ---" % (time.time() - start_time))       
-        return
-        
+
     def load_single_label_file(self, path: str):
         """
         Load the single data file. We only support user specifying the numpy label
@@ -216,7 +196,8 @@ class GenericSSLDataset(VisslDatasetBase):
             class_idx_file_path = (
                 f"{checkpoint_folder}/{split.lower()}_label_to_index_map.json"
             )
-            save_file(cls_idx_map, class_idx_file_path)
+            if not g_pathmgr.exists(class_idx_file_path):
+                save_file(cls_idx_map, class_idx_file_path, append_to_json=False)
 
     def _convert_to_numeric_ids(self, labels: np.ndarray) -> np.ndarray:
         """
@@ -409,6 +390,7 @@ class GenericSSLDataset(VisslDatasetBase):
             pass
         
         item['mask']=mask
+        
         # apply the transforms on the image
         if self.transform:
             item = self.transform(item)
@@ -436,15 +418,20 @@ class GenericSSLDataset(VisslDatasetBase):
             image_paths (List[List[str]]): list containing image paths list for each
                                             data source.
         """
-        
         image_paths = []
         for i, source in enumerate(self.data_objs):
             if not getattr(source, "get_image_paths", 0):
                 msg = f"Cannot retrieve image paths for source {self.data_sources[i]}"
                 raise ValueError(msg)
-            image_paths.append(source.get_image_paths())
-            
-        self.image_paths = image_paths[0]
+
+            data_obj_paths = source.get_image_paths()
+            if self.data_limit >= 0 and self._can_random_subset_data_sources():
+                if not self._subset_initialized:
+                    self._init_image_and_label_subset()
+                data_obj_paths = [
+                    data_obj_paths[idx] for idx in self.image_and_label_subset
+                ]
+            image_paths.append(data_obj_paths)
         return image_paths
 
     def get_available_splits(self, dataset_config):

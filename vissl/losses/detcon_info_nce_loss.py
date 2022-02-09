@@ -23,18 +23,20 @@ class DetconInfoNCELoss(ClassyLoss):
 
         self.loss_config = loss_config
         # loss constants
+        self.global_batch_size = self.loss_config.global_batch_size
+        self.mask_rois = self.loss_config.mask_rois
         self.temperature = self.loss_config.temperature
         self.buffer_params = self.loss_config.buffer_params
         self.info_criterion = DetconInfoNCECriterion(
-            self.buffer_params, self.temperature
+            self.buffer_params, self.temperature, self.global_batch_size, self.mask_rois
         )
 
     @classmethod
     def from_config(cls, loss_config: AttrDict):
         return cls(loss_config)
 
-    def forward(self, output,mask_ids, target):
-        loss = self.info_criterion(output,mask_ids)
+    def forward(self, output1,output2,mask_ids1,mask_ids2, target):
+        loss = self.info_criterion(output1,output2,mask_ids1,mask_ids2)
         return loss
 
     def __repr__(self):
@@ -44,12 +46,13 @@ class DetconInfoNCELoss(ClassyLoss):
 
 class DetconInfoNCECriterion(nn.Module):
 
-    def __init__(self, buffer_params, temperature: float):
+    def __init__(self, buffer_params, temperature: float, global_batch_size: int, mask_rois: int):
         super(DetconInfoNCECriterion, self).__init__()
         self.use_gpu = get_cuda_device_index() > -1
         self.temperature = temperature
         self.max_val = 1e9
-        self.num_rois = 16
+        self.num_rois = mask_rois
+        self.batch_size = global_batch_size
         self.buffer_params = buffer_params
         self.dist_rank = get_rank()
         logging.info(f"Creating Detcon Info-NCE loss")
@@ -61,19 +64,14 @@ class DetconInfoNCECriterion(nn.Module):
         return same_obj.float().unsqueeze(2)
     
     def manual_cross_entropy(self,labels, logits, weight):
-        ce = - weight * torch.sum(labels * torch.nn.functional.softmax(logits,dim = 1), dim=-1)
+        ce = - weight * torch.sum(labels * torch.nn.functional.log_softmax(logits,dim = 1), dim=-1)
         return torch.mean(ce)
 
-    def forward(self, embedding: torch.Tensor, mask_ids: torch.Tensor):
-        batch_size = int(len(embedding)/2)
+    def forward(self, target1: torch.Tensor,target2: torch.Tensor, tind1: torch.Tensor,tind2: torch.Tensor):
         #import ipdb;ipdb.set_trace()
+        target1,target2,tind1,tind2 = self.gather_embeddings_ids(target1,target2,tind1,tind2)
         
-        embeddings_buffer,mask_ids_buffer = self.gather_embeddings_ids(embedding,mask_ids)
-        target1 = embeddings_buffer[:batch_size]
-        target2 = embeddings_buffer[batch_size:]
-        tind1 = mask_ids_buffer[:batch_size]
-        tind2 = mask_ids_buffer[batch_size:]
-
+        
         same_obj_aa = self.make_same_obj(tind1, tind1).to('cuda')
         same_obj_ab = self.make_same_obj(tind1, tind2).to('cuda')
         same_obj_ba = self.make_same_obj(tind2, tind1).to('cuda')
@@ -82,10 +80,10 @@ class DetconInfoNCECriterion(nn.Module):
         target1 = torch.nn.functional.normalize(target1)
         target2 = torch.nn.functional.normalize(target2)
 
-        labels_local = torch.nn.functional.one_hot(torch.tensor(np.arange(batch_size))
-                                                   ,batch_size).unsqueeze(1).unsqueeze(3).to('cuda')
-        labels_ext = torch.nn.functional.one_hot(torch.tensor(np.arange(batch_size)),
-                                                 batch_size * 2).unsqueeze(1).unsqueeze(3).to('cuda')
+        labels_local = torch.nn.functional.one_hot(torch.tensor(np.arange(self.batch_size))
+                                                   ,self.batch_size).unsqueeze(1).unsqueeze(3).to('cuda')
+        labels_ext = torch.nn.functional.one_hot(torch.tensor(np.arange(self.batch_size)),
+                                                 self.batch_size * 2).unsqueeze(1).unsqueeze(3).to('cuda')
 
         logits_aa = torch.einsum("abk,uvk->abuv", target1, target1) / self.temperature
         logits_bb = torch.einsum("abk,uvk->abuv", target2, target2) / self.temperature
@@ -105,12 +103,12 @@ class DetconInfoNCECriterion(nn.Module):
         labels_abaa = torch.cat([labels_ab, labels_aa], axis=2)
         labels_babb = torch.cat([labels_ba, labels_bb], axis=2)
 
-        labels_0 = torch.reshape(labels_abaa, [batch_size, self.num_rois, -1])
-        labels_1 = torch.reshape(labels_babb, [batch_size, self.num_rois, -1])
+        labels_0 = torch.reshape(labels_abaa, [self.batch_size, self.num_rois, -1])
+        labels_1 = torch.reshape(labels_babb, [self.batch_size, self.num_rois, -1])
 
         num_positives_0 = torch.sum(labels_0, axis=-1, keepdims=True)
         num_positives_1 = torch.sum(labels_1, axis=-1, keepdims=True)
-
+        
         labels_0 = labels_0 / torch.max(num_positives_0, torch.ones(num_positives_0.shape).to('cuda'))
         labels_1 = labels_1 / torch.max(num_positives_1, torch.ones(num_positives_1.shape).to('cuda'))
 
@@ -125,25 +123,29 @@ class DetconInfoNCECriterion(nn.Module):
         logits_abaa = torch.cat([logits_ab, logits_aa], axis=2)
         logits_babb = torch.cat([logits_ba, logits_bb], axis=2)
 
-        logits_abaa = torch.reshape(logits_abaa, [batch_size, self.num_rois, -1])
-        logits_babb = torch.reshape(logits_babb, [batch_size, self.num_rois, -1])
+        logits_abaa = torch.reshape(logits_abaa, [self.batch_size, self.num_rois, -1])
+        logits_babb = torch.reshape(logits_babb, [self.batch_size, self.num_rois, -1])
 
         loss_a = self.manual_cross_entropy(labels_0, logits_abaa, weights_0)
         loss_b = self.manual_cross_entropy(labels_1, logits_babb, weights_1)
         loss = loss_a + loss_b
-        
+
         return loss
 
     @staticmethod
-    def gather_embeddings_ids(embedding: torch.Tensor,mask_ids: torch.Tensor):
+    def gather_embeddings_ids(embedding1: torch.Tensor,embedding2: torch.Tensor,mask_ids1: torch.Tensor,mask_ids2: torch.Tensor):
         """
         Do a gather over all embeddings, so we can compute the loss.
         Final shape is like: (batch_size * num_gpus) x embedding_dim
         """
         if torch.distributed.is_available() and torch.distributed.is_initialized():
-            embedding_gathered = gather_from_all(embedding)
-            mask_ids_gathered = gather_from_all(mask_ids)
+            embedding_gathered1 = gather_from_all(embedding1)
+            embedding_gathered2 = gather_from_all(embedding2)
+            mask_ids_gathered1 = gather_from_all(mask_ids1)
+            mask_ids_gathered2 = gather_from_all(mask_ids2)
         else:
-            embedding_gathered = embedding
-            mask_ids_gathered = mask_ids
-        return embedding_gathered, mask_ids_gathered
+            embedding_gathered1 = embedding1
+            embedding_gathered2 = embedding2
+            mask_ids_gathered1 = mask_ids1
+            mask_ids_gathered2 = mask_ids2
+        return embedding_gathered1,embedding_gathered2,mask_ids_gathered1,mask_ids_gathered2

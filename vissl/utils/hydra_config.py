@@ -121,7 +121,6 @@ def compose_hydra_configuration(overrides: List[str]):
         from hydra.experimental import compose, initialize_config_module
 
     # Compose the overrides with "vissl/config/defaults.yaml"
-    #import ipdb;ipdb.set_trace()
     with initialize_config_module(config_module="vissl.config"):
         return compose("defaults", overrides=overrides)
 
@@ -360,7 +359,10 @@ def infer_losses_config(cfg):
         ),
         None,
     )
-
+    #import ipdb;ipdb.set_trace()
+    if "detcon_info_nce_loss" in cfg.LOSS.name:
+        cfg.LOSS[cfg.LOSS.name]["global_batch_size"] = cfg.DISTRIBUTED.NUM_NODES * cfg.DISTRIBUTED.NUM_PROC_PER_NODE * cfg.DATA.TRAIN.BATCHSIZE_PER_REPLICA
+        
     # some inference for the Info-NCE loss.
     if "simclr_info_nce_loss" in cfg.LOSS.name:
         cfg.LOSS[cfg.LOSS.name]["buffer_params"]["world_size"] = (
@@ -475,7 +477,7 @@ def assert_transforms(cfg):
                     assert is_augly_available(), "Please pip install augly."
 
 
-def infer_fsdp(cfg):
+def infer_fsdp_setup(cfg):
     """
     inference for the FSDP settings. Conditions are:
     1) use the FSDP task
@@ -658,7 +660,7 @@ def infer_and_assert_hydra_config(cfg, engine_name: str):
         del cfg.OPTIMIZER.base_optimizer["head_optimizer_params"]
 
     # Infer fsdp settings
-    cfg = infer_fsdp(cfg)
+    cfg = infer_fsdp_setup(cfg)
 
     if cfg.DATA.TRAIN.BASE_DATASET == "generic_ssl":
         assert (

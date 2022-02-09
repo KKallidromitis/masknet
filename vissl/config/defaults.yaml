@@ -377,8 +377,7 @@ config:
         SEED: 0
         IS_BALANCED: False
         SKIP_NUM_SAMPLES: 0
-      MASK_IDX: ''
-      MASK_DIR: ''
+
       # whether the data specified (whether file list or directory) should be copied locally
       # on the machine where training is happening.
       COPY_TO_LOCAL_DISK: False
@@ -608,6 +607,8 @@ config:
       # if we want to evaluate the full model, this requires loading the head weights as well
       # from model weights file. In this case, set the following to True.
       EVAL_TRUNK_AND_HEAD: False
+      # whether to assert that the head layers shape matches exactly
+      ASSERT_HEAD_LAYER_SHAPE_INIT: True
       # whether features should be flattened to result in N x D feature shape
       SHOULD_FLATTEN_FEATS: True
       # model features that should be evaluated for linear classification and what
@@ -655,6 +656,13 @@ config:
         # use this so we set the default as 2.
         LAYER4_STRIDE: 2
         DROP_LAST: 0
+      # ------------------------------------------------------------- #
+      # SimCLR-v2 ResNet params that includes selective kernel
+      # ------------------------------------------------------------- #
+      RESNETS_SK:
+        DEPTH: 152
+        WIDTH_MULTIPLIER: 3
+        SK_RATIO: 0.0625
 
       # ------------------------------------------------------------- #
       # EfficientNet params
@@ -706,6 +714,7 @@ config:
         HIDDEN_DIM: 384
         NUM_LAYERS: 12
         NUM_HEADS: 8
+        MLP_RATIO: 4.0
         DROPOUT_RATE: 0
         ATTENTION_DROPOUT_RATE: 0
         DROP_PATH_RATE: 0.05
@@ -713,6 +722,34 @@ config:
         TOKENS_NORM: True
         QKV_BIAS: True # Bias for QKV in attention layers.
         QK_SCALE: False # Scale
+
+      # ------------------------------------------------------------- #
+      # BEiT.
+      # https://github.com/microsoft/unilm/blob/master/beit/modeling_finetune.py
+      # https://arxiv.org/pdf/2106.08254.pdf
+      # ------------------------------------------------------------- #
+      BEIT:
+        IMAGE_SIZE: 224
+        PATCH_SIZE: 16
+        NUM_LAYERS: 12
+        NUM_HEADS: 12
+        HIDDEN_DIM: 768
+        MLP_RATIO: 4.0
+        # MLP and projection layer dropout rate
+        DROPOUT_RATE: 0
+        # Attention dropout rate
+        ATTENTION_DROPOUT_RATE: 0
+        # Stochastic depth dropout rate. Turning on stochastic depth and
+        # using aggressive augmentation is essentially the difference
+        # between a DeiT and a ViT.
+        DROP_PATH_RATE: 0
+        QKV_BIAS: False # Bias for QKV in attention layers.
+        QK_SCALE: False # Scale
+        USE_ABS_POS_EMB: True
+        USE_REL_POS_BIAS: False
+        USE_SHARED_REL_POS_BIAS: False
+        USE_MEAN_POOLING: True
+        INIT_VALUES: False
 
       # ------------------------------------------------------------- #
       # Parameters unique to the ConViT and not used for standard vision
@@ -786,19 +823,6 @@ config:
       #          ["eval_mlp", {"in_channels": 1024, "dims": [9216, 1000]}],
       #          ["eval_mlp", {"in_channels": 2048, "dims": [8192, 1000]}],
       #        ]
-      PARAMS: []
-      # epsilon for the batchnorm. Set to default pytorch value.
-      BATCHNORM_EPS: 1e-5
-      # momentum for the batchnorm. Set to default pytorch value.
-      BATCHNORM_MOMENTUM: 0.1
-      # if we want to multiply the initialization of the head parameters by a factor,
-      # specify the multiplier. By default, set to 1.0
-      # this setting is helpful for scaling the model output.
-      PARAMS_MULTIPLIER: 1.0
-    # ----------------------------------------------------------------------------------- #
-    # MASK NET
-    # ----------------------------------------------------------------------------------- #
-    MASKNET:
       PARAMS: []
       # epsilon for the batchnorm. Set to default pytorch value.
       BATCHNORM_EPS: 1e-5
@@ -958,10 +982,11 @@ config:
     # ----------------------------------------------------------------------------------- #
     detcon_info_nce_loss:
       temperature: 0.1
+      mask_rois: 64                # automatically inferred
+      global_batch_size: 4096    # automatically inferred
       buffer_params:
-        world_size: 8                 # automatically inferred
         embedding_dim: 128
-        effective_batch_size: 2048    # automatically inferred
+
         
     # ----------------------------------------------------------------------------------- #
     # Multi-crop version of SimCLR InfoNCE LOSS (supports multicrop augmentation proposed
@@ -1180,7 +1205,10 @@ config:
     #   as soon as they are computed (accumulate none in memory)
     # - if set to -1, the extract_engine engine will dump features
     #   at the very end (accumulate all in memory)
-    CHUNK_THRESHOLD: 0
+    CHUNK_THRESHOLD: -1
+    # if user wants to save the extracted features as img_filename.npy
+    # we simply save the features that way
+    MAP_FEATURES_TO_IMG_NAME: False
 
   # ----------------------------------------------------------------------------------- #
   # CLUSTERFIT APPROACH (https://arxiv.org/abs/1912.03330)
@@ -1212,6 +1240,21 @@ config:
       # * if 0, dimensionality reduction is disabled
       # * if > 0, define the number of target dimensions of PCA
       DIMENSIONALITY_REDUCTION: 0
+
+  # ----------------------------------------------------------------------------------- #
+  # Ranking features using faiss
+  # ----------------------------------------------------------------------------------- #
+  RANKING:
+    USE_GPU: False
+    # currently we only support faiss backend ranking.
+    RANKING_BACKEND: "faiss"
+    NORMALIZE_FEATS: True
+    APPLY_PCA: False
+    PCA_DIM: 128
+    FEATURES:
+      DATA_PARTITION: "TRAIN"
+      DATASET_NAME: ""
+      LAYER_NAME: ""
 
   # ----------------------------------------------------------------------------------- #
   # TRAINER (define your train step)
@@ -1373,6 +1416,9 @@ config:
       # low shot values to consider. k=2 means 2 positives for a class and 2 negative from every
       # remaining class
       k_values: [1, 2, 4, 8, 16, 32, 64, 96]
+  # If empty, SVM will run extract features and run SVM on these
+  # If not empty, SVM will use the path to find the features
+  SVM_FEATURES_PATH: ""
 
   # ----------------------------------------------------------------------------------- #
   # INSTANCE RETRIEVAL (benchmark)
@@ -1449,3 +1495,15 @@ config:
     FEATURES:
       # If empty, will run the extract features, if not, use the path to find the features
       PATH: ""
+
+  # ----------------------------------------------------------------------------------- #
+  # Geo Localization (benchmark)
+  # ----------------------------------------------------------------------------------- #
+  GEO_LOCALIZATION:
+    # Benchmark Details:
+    #   Step1: Take a model and extract the model label predictions on test data.
+    #   Step2: Find the corresponding latitude/longitude predictions using the json mapping for train set.
+    #   Step3: find the ground truth latitute/longitude and compute the metric following the code.
+    TRAIN_LABEL_MAPPING: "/path/to/.json"
+    # [1, 25, 200, 750, 2500] -> [street, city, region, country, continent]
+    ACC_KM_THRESHOLDS: [1, 25, 200, 750, 2500]

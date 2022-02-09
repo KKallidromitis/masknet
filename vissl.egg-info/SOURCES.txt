@@ -1,8 +1,24 @@
+README.md
 setup.py
 configs/__init__.py
 configs/config/__init__.py
 hydra_plugins/vissl_plugin/__init__.py
 hydra_plugins/vissl_plugin/vissl_plugin.py
+tools/__init__.py
+tools/cluster_assignments_to_dataset.py
+tools/cluster_features_and_label.py
+tools/extract_feature_and_rank.py
+tools/geolocalization_test.py
+tools/instance_retrieval_test.py
+tools/launch_benchmark_suite_scheduler_slurm.py
+tools/nearest_neighbor_test.py
+tools/object_detection_benchmark.py
+tools/run_distributed_engines.py
+tools/train_svm.py
+tools/train_svm_low_shot.py
+tools/perf_measurement/__init__.py
+tools/perf_measurement/benchmark_data.py
+tools/perf_measurement/benchmark_transforms.py
 vissl/__init__.py
 vissl.egg-info/PKG-INFO
 vissl.egg-info/SOURCES.txt
@@ -24,7 +40,6 @@ vissl/data/vissl_dataset_base.py
 vissl/data/collators/__init__.py
 vissl/data/collators/collator_helper.py
 vissl/data/collators/cutmixup_collator.py
-vissl/data/collators/detcon_collator.py
 vissl/data/collators/identity_collator.py
 vissl/data/collators/mixup_collator.py
 vissl/data/collators/moco_collator.py
@@ -81,7 +96,6 @@ vissl/losses/barlow_twins_loss.py
 vissl/losses/bce_logits_multiple_output_single_target.py
 vissl/losses/cross_entropy_multiple_output_single_target.py
 vissl/losses/deepclusterv2_loss.py
-vissl/losses/detcon_info_nce_loss.py
 vissl/losses/dino_loss.py
 vissl/losses/distibuted_sinkhornknopp.py
 vissl/losses/moco_loss.py
@@ -111,6 +125,8 @@ vissl/models/trunks/alexnet_colorization.py
 vissl/models/trunks/alexnet_deepcluster.py
 vissl/models/trunks/alexnet_jigsaw.py
 vissl/models/trunks/alexnet_rotnet.py
+vissl/models/trunks/beit_transformer.py
+vissl/models/trunks/classy_vision_transformer.py
 vissl/models/trunks/convit.py
 vissl/models/trunks/efficientnet.py
 vissl/models/trunks/feature_extractor.py
@@ -118,6 +134,7 @@ vissl/models/trunks/regnet.py
 vissl/models/trunks/regnet_fsdp.py
 vissl/models/trunks/resnet.py
 vissl/models/trunks/resnext.py
+vissl/models/trunks/resnext_selective_kernels.py
 vissl/models/trunks/vision_transformer.py
 vissl/models/trunks/xcit.py
 vissl/optimizers/__init__.py
@@ -133,7 +150,6 @@ vissl/trainer/train_sdp_task.py
 vissl/trainer/train_task.py
 vissl/trainer/trainer_main.py
 vissl/trainer/train_steps/__init__.py
-vissl/trainer/train_steps/detcon_train_step.py
 vissl/trainer/train_steps/standard_train_step.py
 vissl/utils/__init__.py
 vissl/utils/activation_checkpointing.py
@@ -150,7 +166,6 @@ vissl/utils/env.py
 vissl/utils/extract_features_utils.py
 vissl/utils/fsdp_utils.py
 vissl/utils/hydra_config.py
-vissl/utils/input_mask.py
 vissl/utils/io.py
 vissl/utils/knn_utils.py
 vissl/utils/layer_memory_tracking.py

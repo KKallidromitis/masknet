@@ -146,10 +146,10 @@ class Preload_Masks():
 
 if __name__=="__main__":
     
-    mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/sample/images/',
-                                output_dir = '/home/kkallidromitis/masknet/data/sample/masks/',
-                                mask_type = ['fh','patch'],
-                                batch_num=12,
+    mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/imagenet/train/',
+                                output_dir = '/home/kkallidromitis/masknet/data/imagenet/masks/',
+                                mask_type = ['fh'],
+                                batch_num=1,
                                 experiment_name = 'train',
                                )
 

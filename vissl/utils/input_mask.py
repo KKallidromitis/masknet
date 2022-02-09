@@ -59,7 +59,7 @@ def sample_masks(binary_mask,n_masks=16):
 def create_maskedfeats(masks,feats):
     bs, emb, emb_x, emb_y  = feats.shape
     masks_area = masks.sum(axis=-1, keepdims=True)
-    smpl_masks = masks / torch.clamp(masks_area, 1)
+    smpl_masks = masks / torch.clamp(masks_area, 1) ###
 
     embedding_local = torch.reshape(feats,[bs, emb_x*emb_y, emb])
     smpl_embedding = torch.matmul(smpl_masks.float(), embedding_local)

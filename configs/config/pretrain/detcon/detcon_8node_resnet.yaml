@@ -23,7 +23,7 @@ config:
     TRAIN:
       DATA_SOURCES: [disk_folder]
       DATASET_NAMES: [imagenet1k_folder]
-      BATCHSIZE_PER_REPLICA: 5
+      BATCHSIZE_PER_REPLICA: 32
       LABEL_TYPE: sample_index    # just an implementation detail. Label isn't used
       TRANSFORMS:
         - name: ImgReplicatePil
@@ -62,12 +62,7 @@ config:
       PARAMS: [
         ["mlp", {"dims": [2048, 2048], "use_relu": True, "skip_last_layer_relu_bn": False}],
         ["mlp", {"dims": [2048, 128]}],
-      ]
-    MASKNET:
-      LAMBDA: 0.01
-      PARAMS: [
-        ["conv", {"num_dim": 2, "dims": [16, 16], "use_relu": True, "batch_norm": True}],
-      ]    
+      ]   
     SYNC_BN_CONFIG:
       CONVERT_BN_TO_SYNC_BN: True
       SYNC_BN_TYPE: apex
@@ -80,9 +75,10 @@ config:
       name: detcon_info_nce_loss
       detcon_info_nce_loss:
         temperature: 0.1
+        mask_rois: 16
         buffer_params:
           embedding_dim: 128
-          effective_batch_size: 160
+          
   OPTIMIZER:
       name: sgd
       use_larc: True

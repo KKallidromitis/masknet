@@ -100,6 +100,7 @@ class SimclrInfoNCECriterion(nn.Module):
         batch_size = total_images // world_size
         orig_images = batch_size // self.num_pos
         rank = self.dist_rank
+
         pos_mask = torch.zeros(batch_size, total_images)
         neg_mask = torch.zeros(batch_size, total_images)
 
