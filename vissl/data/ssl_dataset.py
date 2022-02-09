@@ -5,8 +5,9 @@
 
 import logging
 from typing import Any, Callable, Dict, Set
-
+import pickle
 import numpy as np
+import torch
 from classy_vision.generic.distributed_util import get_world_size
 from iopath.common.file_io import g_pathmgr
 from vissl.config import AttrDict
@@ -98,6 +99,7 @@ class GenericSSLDataset(VisslDatasetBase):
         self.image_and_label_subset = None
         self._verify_data_sources(split, dataset_source_map)
         self._get_data_files(split)
+        self._get_masks()
 
         if len(self.label_sources) > 0 and len(self.label_paths) > 0:
             assert len(self.label_sources) == len(self.label_paths), (
@@ -161,7 +163,13 @@ class GenericSSLDataset(VisslDatasetBase):
         logging.info(
             f"Rank: {local_rank} split: {split} Label files:\n{self.label_paths}"
         )
-
+        
+    def _get_masks(self):
+        if self.cfg.DATA.TRAIN.MASK_IDX!='':
+            with open(self.cfg.DATA.TRAIN.MASK_IDX, "rb") as file:
+                self.img_to_mask = pickle.load(file)          
+        return
+    
     def load_single_label_file(self, path: str):
         """
         Load the single data file. We only support user specifying the numpy label
@@ -375,25 +383,19 @@ class GenericSSLDataset(VisslDatasetBase):
                 item["label"].append(0)
         else:
             raise ValueError(f"Unknown label type: {self.label_type}")
-
-        #import ipdb;ipdb.set_trace()
+            
         mask=[[]]
-        try:
-            if self.cfg.DATA.TRAIN.MASK_DIR!='':
-                #self.get_image_paths()
-                #batch,idx = self.img_to_mask[self.image_paths[item["data_idx"][0]]]
-                #mask = [self.masks[batch][idx].unsqueeze(0)]
-                
-                mask=[create_patch_mask(item['data'][0],segments=[3,2]).unsqueeze(0)]
-                #mask=[create_fh_mask(item['data'][0],scale=1000, min_size=1000).unsqueeze(0)]
-        except:
-            pass
-        
+        #import ipdb;ipdb.set_trace()
+
+        if self.cfg.DATA.TRAIN.MASK_DIR!='':
+            mask_path = self.img_to_mask[item["data_idx"][0]]
+            mask = [torch.load(mask_path).unsqueeze(0)]
+            
         item['mask']=mask
-        
         # apply the transforms on the image
         if self.transform:
             item = self.transform(item)
+        
         return item
 
     def __len__(self):
@@ -432,6 +434,7 @@ class GenericSSLDataset(VisslDatasetBase):
                     data_obj_paths[idx] for idx in self.image_and_label_subset
                 ]
             image_paths.append(data_obj_paths)
+        self.image_paths = image_paths
         return image_paths
 
     def get_available_splits(self, dataset_config):

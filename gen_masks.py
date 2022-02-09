@@ -24,7 +24,7 @@ class ImageFolderWithPaths(datasets.ImageFolder):
     
     
 class Preload_Masks():
-    def __init__(self,dataset_dir,output_dir,mask_type=['fh','patch'],batch_num=100,experiment_name='',
+    def __init__(self,dataset_dir,output_dir,mask_type=['fh','patch'],experiment_name='',
                  num_threads=os.cpu_count(),scale=1000,min_size=1000,segments=[3,3]):
         
         self.output_dir=output_dir
@@ -34,11 +34,9 @@ class Preload_Masks():
         self.segments = segments
         self.experiment_name = experiment_name
         self.num_threads = num_threads
-        self.batch_num = batch_num
         self.totensor = torchvision.transforms.ToTensor()
         self.image_dataset = ImageFolderWithPaths(dataset_dir,transform=self.totensor)
         self.ds_length = len(self.image_dataset)
-        self.size = len(self.image_dataset)//self.batch_num
         self.save_path = os.path.join(self.output_dir,self.experiment_name)
         
     def create_patch_mask(self,image,segments):
@@ -60,96 +58,55 @@ class Preload_Masks():
         return torch.tensor(mask).int()
 
     def select_mask(self,obj):
-        image,label,path = obj
-        mask_fh,mask_patch = [],[]
-        
+        image,label,img_path = obj
+
+        name = os.path.join(self.save_path,os.path.splitext('_'.join(img_path.split('/')[-2:]))[0])
         if 'fh' in self.mask_type:
-            mask_fh = self.create_fh_mask(image, scale=self.scale, min_size=self.min_size)
+            mask_fh = self.create_fh_mask(image, scale=self.scale, min_size=self.min_size).to(dtype=torch.int8)
+            torch.save(mask_fh,name+'_fh.pt')
         if 'patch' in self.mask_type:  
-            mask_patch = self.create_patch_mask(image,segments=self.segments)
-            
-        return [mask_fh,mask_patch,path]
+            mask_patch = self.create_patch_mask(image,segments=self.segments).to(dtype=torch.int8)
+            torch.save(mask_patch,name+'_patch.pt')
+
+        return [img_path,name+'_fh.pt',name+'_patch.pt']
     
     def pkl_save(self,file,name):
         with open(name, 'wb') as handle:
             pickle.dump(file, handle, protocol=pickle.HIGHEST_PROTOCOL)
     
-    def save_masks(self,mask_fh,mask_patch,base_name):
+    def save_dicts(self,img_paths,fh_paths,patch_paths):
 
         if 'fh' in self.mask_type:
-            self.pkl_save(mask_fh,base_name+'_fh.pkl')
+            self.pkl_save(fh_paths,self.save_path+'/img_to_fh.pkl')
 
         if 'patch' in self.mask_type:
-            self.pkl_save(mask_patch,base_name+'_patch.pkl')
-        return
-
-    def save_dicts(self,fh_dict,patch_dict):
-
-        if 'fh' in self.mask_type:
-            self.pkl_save(fh_dict,self.save_path+'/img_to_fh.pkl')
-
-        if 'patch' in self.mask_type:
-            self.pkl_save(patch_dict,self.save_path+'/img_to_patch.pkl')
-        return
-    
-    def save_dir(self,fh_dir,patch_dir):
-
-        if 'fh' in self.mask_type:
-            self.pkl_save(fh_dir,self.save_path+'/fh_dir.pkl')
-
-        if 'patch' in self.mask_type:
-            self.pkl_save(patch_dir,self.save_path+'/patch_dir.pkl')
+            self.pkl_save(fh_paths,self.save_path+'/img_to_patch.pkl')
         return
     
     def forward(self):
-        print('Dataset Length: %d  Size of Batches: %d'%(self.ds_length,self.size))
-        img_paths,fh_paths,patch_paths,idx = [],[],[],[]
-        fh_dir,patch_dir = [],[]
         try:
             os.mkdir(os.path.join(output_dir,experiment_name))
         except:
             if not os.path.exists(self.output_dir):
                 os.makedirs(os.path.join(self.output_dir,self.experiment_name))
+                
+        print('Dataset Length: %d  '%(self.ds_length))
+        start = time.time()
+        img_paths,fh_paths,patch_paths = zip(*Parallel(n_jobs=self.num_threads,prefer="threads")
+                                 (delayed(self.select_mask)(obj) for obj in self.image_dataset))
+        end = time.time()
 
-        for batch in range(self.batch_num):
-            start = time.time()
-            ds_range = range(batch*self.size,(batch+1)*self.size)
-            if batch==self.batch_num-1:
-                ds_range = range(batch*self.size,self.ds_length)
+        self.save_dicts(img_paths,fh_paths,patch_paths)
 
-            mask_fh,mask_patch,path = zip(*Parallel(n_jobs=self.num_threads,prefer="threads")
-                                       (delayed(self.select_mask)(self.image_dataset[i]) for i in ds_range))
-
-            end = time.time()
-            print(f"Finished processing batch %d / %d, Time taken %f min"%(batch+1,self.batch_num,(end - start)/60))
-
-            base_name = os.path.join(self.output_dir,self.experiment_name,str(batch))
-            self.save_masks(mask_fh,mask_patch,base_name)
-
-            fh_dir.append(base_name+'_fh.pkl')
-            patch_dir.append(base_name+'_patch.pkl')
-            
-            img_paths.extend(path)
-            fh_paths.extend([batch for p in range(len(path))])
-            patch_paths.extend([batch for p in range(len(path))])
-            idx.extend(list(range(len(path))))
-
-        fh_dict,patch_dict = {},{}
-
-        for i in range(self.ds_length):
-            fh_dict[img_paths[i]] = [fh_paths[i],idx[i]]
-            patch_dict[img_paths[i]] = [patch_paths[i],idx[i]]
-
-        self.save_dicts(fh_dict,patch_dict)
-        self.save_dir(fh_dir,patch_dir)
+        print('Time Taken: %f  '%((end - start)/60))
+        
         return 
-
+ 
 if __name__=="__main__":
     
-    mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/imagenet/train/',
-                                output_dir = '/home/kkallidromitis/masknet/data/imagenet/masks/',
-                                mask_type = ['fh'],
-                                batch_num=1,
+    mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/sample/images/',
+                                output_dir = '/home/kkallidromitis/masknet/data/sample/masks/',
+                                mask_type = ['fh','patch'],
                                 experiment_name = 'train',
                                )
 
