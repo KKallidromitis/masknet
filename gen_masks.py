@@ -71,11 +71,11 @@ class Preload_Masks():
         name = os.path.join(self.save_path,os.path.splitext('_'.join(img_path.split('/')[-2:]))[0])
         
         if self.mask_type =='fh':
-            mask = self.create_fh_mask(image, scale=self.scale, min_size=self.min_size).to(dtype=torch.int8)
+            mask = self.create_fh_mask(image, scale=self.scale, min_size=self.min_size).to(dtype=torch.int16)
         if self.mask_type =='patch':  
-            mask = self.create_patch_mask(image,segments=self.segments).to(dtype=torch.int8)
+            mask = self.create_patch_mask(image,segments=self.segments).to(dtype=torch.int16)
         if self.mask_type =='ground':
-            mask = self.load_ground_mask(img_path).to(dtype=torch.int8)
+            mask = self.load_ground_mask(img_path).to(dtype=torch.int16)
         
         torch.save(mask,name+suffix)
         return [img_path,name+suffix]
