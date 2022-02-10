@@ -108,7 +108,7 @@ class Preload_Masks():
         return 
     
 if __name__=="__main__":
-    
+    '''
     mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/bddtest/images/',
                                 output_dir = '/home/kkallidromitis/masknet/data/bddtest/masks/',
                                 ground_mask_dir = '/home/kkallidromitis/masknet/data/bdd100k/labels/sem_seg/colormaps/train',
@@ -117,12 +117,12 @@ if __name__=="__main__":
                                )
 
     mask_loader.forward()
+    
     '''
-    mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/bddtest/images/',
-                                output_dir = '/home/kkallidromitis/masknet/data/bddtest/masks/',
+    mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/imagenet/train/',
+                                output_dir = '/home/kkallidromitis/masknet/data/imagenet/masks/',
                                 mask_type = 'fh',
                                 experiment_name = 'train',
                                )
 
     mask_loader.forward()
-    '''
