@@ -8,6 +8,7 @@ import os
 import time
 import logging
 from torchvision import datasets
+import matplotlib.image as mpimg
 
 class ImageFolderWithPaths(datasets.ImageFolder):
     """Custom dataset that includes image file paths. Extends
@@ -24,7 +25,7 @@ class ImageFolderWithPaths(datasets.ImageFolder):
     
     
 class Preload_Masks():
-    def __init__(self,dataset_dir,output_dir,mask_type=['fh','patch'],experiment_name='',
+    def __init__(self,dataset_dir,output_dir,ground_mask_dir='',mask_type='fh',experiment_name='',
                  num_threads=os.cpu_count(),scale=1000,min_size=1000,segments=[3,3]):
         
         self.output_dir=output_dir
@@ -34,6 +35,7 @@ class Preload_Masks():
         self.segments = segments
         self.experiment_name = experiment_name
         self.num_threads = num_threads
+        self.ground_mask_dir = ground_mask_dir
         self.totensor = torchvision.transforms.ToTensor()
         self.image_dataset = ImageFolderWithPaths(dataset_dir,transform=self.totensor)
         self.ds_length = len(self.image_dataset)
@@ -56,31 +58,34 @@ class Preload_Masks():
     def create_fh_mask(self,image, scale, min_size):
         mask = felzenszwalb(image.permute(1,2,0), scale=scale, min_size=min_size)
         return torch.tensor(mask).int()
-
+    
+    def load_ground_mask(self,img_path):
+        #assuming masks have ssame name ass images and asre png files
+        mask_path = os.path.join(self.ground_mask_dir,os.path.splitext(img_path.split('/')[-1])[0]+'.png')
+        mask = torch.tensor(mpimg.imread(mask_path)[:,:,0])
+        return mask
+    
     def select_mask(self,obj):
         image,label,img_path = obj
-
+        suffix = '_'+self.mask_type+'.pt'
         name = os.path.join(self.save_path,os.path.splitext('_'.join(img_path.split('/')[-2:]))[0])
-        if 'fh' in self.mask_type:
-            mask_fh = self.create_fh_mask(image, scale=self.scale, min_size=self.min_size).to(dtype=torch.int8)
-            torch.save(mask_fh,name+'_fh.pt')
-        if 'patch' in self.mask_type:  
-            mask_patch = self.create_patch_mask(image,segments=self.segments).to(dtype=torch.int8)
-            torch.save(mask_patch,name+'_patch.pt')
-
-        return [img_path,name+'_fh.pt',name+'_patch.pt']
+        
+        if self.mask_type =='fh':
+            mask = self.create_fh_mask(image, scale=self.scale, min_size=self.min_size).to(dtype=torch.int8)
+        if self.mask_type =='patch':  
+            mask = self.create_patch_mask(image,segments=self.segments).to(dtype=torch.int8)
+        if self.mask_type =='ground':
+            mask = self.load_ground_mask(img_path).to(dtype=torch.int8)
+        
+        torch.save(mask,name+suffix)
+        return [img_path,name+suffix]
     
     def pkl_save(self,file,name):
         with open(name, 'wb') as handle:
             pickle.dump(file, handle, protocol=pickle.HIGHEST_PROTOCOL)
     
-    def save_dicts(self,img_paths,fh_paths,patch_paths):
-
-        if 'fh' in self.mask_type:
-            self.pkl_save(fh_paths,self.save_path+'/img_to_fh.pkl')
-
-        if 'patch' in self.mask_type:
-            self.pkl_save(fh_paths,self.save_path+'/img_to_patch.pkl')
+    def save_dicts(self,img_paths,mask_paths):
+        self.pkl_save(mask_paths,self.save_path+'/img_to_'+self.mask_type+'.pkl')
         return
     
     def forward(self):
@@ -92,22 +97,32 @@ class Preload_Masks():
                 
         print('Dataset Length: %d  '%(self.ds_length))
         start = time.time()
-        img_paths,fh_paths,patch_paths = zip(*Parallel(n_jobs=self.num_threads,prefer="threads")
+        img_paths,mask_paths = zip(*Parallel(n_jobs=self.num_threads,prefer="threads")
                                  (delayed(self.select_mask)(obj) for obj in self.image_dataset))
         end = time.time()
 
-        self.save_dicts(img_paths,fh_paths,patch_paths)
+        self.save_dicts(img_paths,mask_paths)
 
         print('Time Taken: %f  '%((end - start)/60))
         
         return 
- 
+    
 if __name__=="__main__":
     
-    mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/sample/images/',
-                                output_dir = '/home/kkallidromitis/masknet/data/sample/masks/',
-                                mask_type = ['fh','patch'],
+    mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/bddtest/images/',
+                                output_dir = '/home/kkallidromitis/masknet/data/bddtest/masks/',
+                                ground_mask_dir = '/home/kkallidromitis/masknet/data/bdd100k/labels/sem_seg/colormaps/train',
+                                mask_type = 'ground',
                                 experiment_name = 'train',
                                )
 
     mask_loader.forward()
+    '''
+    mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/bddtest/images/',
+                                output_dir = '/home/kkallidromitis/masknet/data/bddtest/masks/',
+                                mask_type = 'fh',
+                                experiment_name = 'train',
+                               )
+
+    mask_loader.forward()
+    '''

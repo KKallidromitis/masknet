@@ -43,8 +43,8 @@ config:
           mean: [0.485, 0.456, 0.406]
           std: [0.229, 0.224, 0.225]
       COLLATE_FUNCTION: detcon_collator
-      MASK_IDX: '/home/kkallidromitis/masknet/data/sample/masks/train/img_to_fh.pkl'
-      MASK_DIR: '/home/kkallidromitis/masknet/data/sample/masks/train/fh_dir.pkl'
+      #MASK_IDX: '/home/kkallidromitis/masknet/data/sample/masks/train/img_to_fh.pkl'
+      MASK_IDX: '/home/kkallidromitis/masknet/data/bddtest/masks/train/img_to_ground.pkl'
       COPY_TO_LOCAL_DISK: False
       COPY_DESTINATION_DIR: /tmp/tmp_dataset/
       DROP_LAST: True

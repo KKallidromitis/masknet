@@ -386,8 +386,8 @@ class GenericSSLDataset(VisslDatasetBase):
             
         mask=[[]]
         #import ipdb;ipdb.set_trace()
-
-        if self.cfg.DATA.TRAIN.MASK_DIR!='':
+        
+        if self.cfg.DATA.TRAIN.MASK_IDX!='':
             mask_path = self.img_to_mask[item["data_idx"][0]]
             mask = [torch.load(mask_path).unsqueeze(0)]
             

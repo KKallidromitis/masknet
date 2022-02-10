@@ -187,8 +187,8 @@
         "train": ["/home/kkallidromitis/masknet/data/sample/images/", "<lbl_path>"],
         "val": ["/home/kkallidromitis/masknet/data/sample/images/", "<lbl_path>"]
     },
-    "mask_imagenet": {
-        "train": ["/home/kkallidromitis/masknet/data/imagenet/paths.npy", "<lbl_path>"],
-        "val": ["/home/kkallidromitis/masknet/data/imagenet/paths.npy", "<lbl_path>"]
+    "bddtest": {
+        "train": ["/home/kkallidromitis/masknet/data/bddtest/images/", "<lbl_path>"],
+        "val": ["/home/kkallidromitis/masknet/data/bddtest/images/", "<lbl_path>"]
     }
 }

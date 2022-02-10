@@ -175,12 +175,16 @@ def detcon_train_step(task):
 
         model_output1,model_output2 = model_output[:batch_size],model_output[batch_size:]
         mask_ids1,mask_ids2 = mask_ids[:batch_size],mask_ids[batch_size:]
+        mask1,mask2 = mask[:batch_size],mask[batch_size:]
         
         task.last_batch.sample = sample
         task.last_batch.model_output = model_output
         task.last_batch.mask_ids = mask_ids
         target = sample["target"]
-
+        
+        #print('Cosine Similarity Emb: ', torch.mean(torch.mean(torch.nn.functional.cosine_similarity(model_output1,model_output2,dim=2))))
+        #print('Cosine Similarity Mask: ', torch.mean(torch.nn.functional.cosine_similarity(mask1,mask2,dim=2)))
+        
         # Run hooks on forward pass
         task.run_hooks(SSLClassyHookFunctions.on_forward.name)
 

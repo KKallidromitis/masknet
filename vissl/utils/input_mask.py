@@ -31,10 +31,21 @@ def create_fh_mask(image, scale=1000, min_size=1000):
     #mask = mask.astype(np.dtype('<u1'))
     return torch.tensor(mask).int()
 
+def remove_pixels(binary_mask):
+    batch = binary_mask.shape[0]
+    max_mask_id = binary_mask.shape[1]
+    xys = torch.randint(0,224,(batch,max_mask_id,1000,2))
+    for i in range(64):
+        for j in range(256):
+            binary_mask[i,j][xys[i,j]]=0
+            
+    return binary_mask
+
 def convert_binary_mask(mask,max_mask_id=256,pool_size=7):
     batch_size = mask.shape[0]
     mask_ids = torch.arange(max_mask_id).reshape(1,max_mask_id, 1, 1).float()
     binary_mask = torch.eq(mask_ids, mask).float()
+    #binary_mask = remove_pixels(binary_mask)
     binary_mask = torch.nn.AdaptiveAvgPool2d((pool_size,pool_size))(binary_mask)
     binary_mask = torch.reshape(binary_mask,(batch_size,max_mask_id,pool_size*pool_size)).permute(0,2,1)
     binary_mask = torch.argmax(binary_mask, axis=-1)
