@@ -9,6 +9,9 @@ import time
 import logging
 from torchvision import datasets
 import matplotlib.image as mpimg
+import cv2 #For binanry mask edge detection
+import argparse
+from tqdm import tqdm
 
 class ImageFolderWithPaths(datasets.ImageFolder):
     """Custom dataset that includes image file paths. Extends
@@ -77,6 +80,8 @@ class Preload_Masks():
         if self.mask_type =='ground':
             mask = self.load_ground_mask(img_path).to(dtype=torch.int16)
         
+        # TODO: Add edge generation!
+        
         torch.save(mask,name+suffix)
         return [img_path,name+suffix]
     
@@ -88,9 +93,43 @@ class Preload_Masks():
         self.pkl_save(mask_paths,self.save_path+'/img_to_'+self.mask_type+'.pkl')
         return
     
+    def get_edges(self, mask_file: str):
+        """Runs CV2 contour detection to find contours in mask (with values 0, ..., num_objects)
+
+        Args:
+            mask_file (str): Mask file name (.pt)
+        """
+        mask_path = os.path.join(self.save_path, mask_file)
+        assert os.path.exists(mask_path), f"Mask path not found {mask_path}"
+        mask = torch.load(mask_path).squeeze().numpy().astype(np.uint8) #Convert to uint8 for cv2
+        
+        # Get contours
+        _, mask = cv2.threshold(mask, 0, 1, cv2.THRESH_BINARY) #Threshold to create binary mask of background - non-background (aka objects)
+        contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE) #Get contours / "edges" between background and objects
+        
+        # Draw contours
+        contour_mask = np.zeros(mask.shape, dtype='uint8')
+        cv2.drawContours(contour_mask, contours=contours, contourIdx=-1, color=1, thickness=1)
+        
+        # Save as tensor
+        contour_mask = self.totensor(255*contour_mask).to(dtype=torch.uint8) #convert to Tensor to save
+        edges_fname = "edges_" + mask_file #Save as edges_maskFileName.pt
+        torch.save(contour_mask, os.path.join(self.save_path, edges_fname))
+    
+    def generate_edge_masks(self): #Generates edges for FH masks that are already saved
+        
+        mask_files = [f for f in os.listdir(self.save_path) if "edges_" != f[:len("edges_")]] #In case re-running
+        
+        # Following forward parallel code
+        start = time.time()
+        Parallel(n_jobs=self.num_threads, prefer="threads")(delayed(self.get_edges)(f) for f in tqdm(mask_files))
+        end = time.time()
+        
+        print('Time Taken: %f  '%((end - start)/60))
+    
     def forward(self):
         try:
-            os.mkdir(os.path.join(output_dir,experiment_name))
+            os.mkdir(os.path.join(self.output_dir,self.experiment_name))
         except:
             if not os.path.exists(self.output_dir):
                 os.makedirs(os.path.join(self.output_dir,self.experiment_name))
@@ -119,10 +158,19 @@ if __name__=="__main__":
     mask_loader.forward()
     
     '''
-    mask_loader = Preload_Masks(dataset_dir = '/home/kkallidromitis/masknet/data/imagenet/train/',
-                                output_dir = '/home/kkallidromitis/masknet/data/imagenet/masks/',
-                                mask_type = 'fh',
-                                experiment_name = 'train',
-                               )
-
-    mask_loader.forward()
+    
+    parser = argparse.ArgumentParser(description='Generate Masks')
+    parser.add_argument('--only_edges', action='store_true',
+                        help='only generate mask edges') 
+    
+    mask_loader = Preload_Masks(dataset_dir = '/home/akash/ilsvrc/train/',
+                            output_dir = '/home/akash/ilsvrc_masks',
+                            mask_type = 'fh',
+                            experiment_name = 'train',
+                            )
+    
+    
+    if parser.parse_args().only_edges: #Only generate edge masks (to avoid re-generating all masks)
+        mask_loader.generate_edge_masks()
+    else:
+        mask_loader.forward()
